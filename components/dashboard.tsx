@@ -5,6 +5,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -51,6 +52,37 @@ function shortDate(dateStr: string) {
   });
 }
 
+function StatCard({
+  label,
+  value,
+  tone = "default",
+  subtext,
+}: {
+  label: string;
+  value: string;
+  tone?: "default" | "green" | "red" | "blue" | "amber";
+  subtext?: string;
+}) {
+  const toneClass =
+    tone === "green"
+      ? "text-green-600"
+      : tone === "red"
+      ? "text-red-600"
+      : tone === "blue"
+      ? "text-blue-600"
+      : tone === "amber"
+      ? "text-amber-600"
+      : "text-gray-900";
+
+  return (
+    <div className="rounded-2xl border bg-white p-5 shadow-sm">
+      <p className="text-sm text-gray-500">{label}</p>
+      <p className={`mt-2 text-2xl font-bold ${toneClass}`}>{value}</p>
+      {subtext ? <p className="mt-1 text-xs text-gray-500">{subtext}</p> : null}
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [solPrice, setSolPrice] = useState(120);
 
@@ -59,7 +91,7 @@ export default function Dashboard() {
 
   const [weeklyContribution, setWeeklyContribution] = useState(50);
   const [stakingRate, setStakingRate] = useState(5.63);
-  const [growthRate, setGrowthRate] = useState(10);
+  const [growthRate, setGrowthRate] = useState(15);
   const [currentAge, setCurrentAge] = useState(4);
   const [targetAge, setTargetAge] = useState(20);
 
@@ -154,39 +186,72 @@ export default function Dashboard() {
     return contributions.reduce((sum, row) => sum + Number(row.sol_bought || 0), 0);
   }, [contributions]);
 
+  const walletSolNum = Number(walletSol || 0);
+  const stakedSolNum = Number(stakedSol || 0);
+  const totalSolHeld = walletSolNum + stakedSolNum;
+  const solPriceNum = Number(solPrice || 0);
+
+  const portfolioValue = totalSolHeld * solPriceNum;
+  const costBasis = totalInvested;
+  const profitLoss = portfolioValue - costBasis;
+  const returnPercent = costBasis > 0 ? (profitLoss / costBasis) * 100 : 0;
+
   const avgBuyPrice = useMemo(() => {
     if (totalSolFromBuys <= 0) return 0;
     return totalInvested / totalSolFromBuys;
   }, [totalInvested, totalSolFromBuys]);
 
-  const totalSolHeld = walletSol + stakedSol;
-  const totalValue = totalSolHeld * solPrice;
-  const gainLoss = totalValue - totalInvested;
+  const boughtSolValue = totalSolFromBuys * solPriceNum;
+  const walletOnlyValue = walletSolNum * solPriceNum;
+  const stakedOnlyValue = stakedSolNum * solPriceNum;
+  const manualDifferenceSol = totalSolHeld - totalSolFromBuys;
 
-  const projectedValue = useMemo(() => {
+  const projectionResults = useMemo(() => {
     const years = Math.max(targetAge - currentAge, 0);
     const weeklyStake = Math.pow(1 + stakingRate / 100, 1 / 52) - 1;
     const weeklyGrowth = Math.pow(1 + growthRate / 100, 1 / 52) - 1;
 
-    let sol = totalSolHeld;
+    let solWithStaking = totalSolHeld;
+    let solWithoutStaking = totalSolHeld;
     let price = solPrice;
 
+    let futureContributionsOnly = totalInvested;
+
     for (let i = 0; i < years * 52; i++) {
-      sol += weeklyContribution / price;
-      sol *= 1 + weeklyStake;
+      solWithStaking += weeklyContribution / price;
+      solWithoutStaking += weeklyContribution / price;
+      futureContributionsOnly += weeklyContribution;
+      solWithStaking *= 1 + weeklyStake;
       price *= 1 + weeklyGrowth;
     }
 
-    return sol * price;
+    const projectedValueWithStaking = solWithStaking * price;
+    const projectedValueWithoutStaking = solWithoutStaking * price;
+
+    const stakingOnlyBoost =
+      projectedValueWithStaking - projectedValueWithoutStaking;
+
+    const priceGrowthBoost =
+      projectedValueWithStaking - futureContributionsOnly - stakingOnlyBoost;
+
+    return {
+      projectedValue: projectedValueWithStaking,
+      futureContributionsOnly,
+      stakingOnlyBoost,
+      priceGrowthBoost,
+    };
   }, [
     currentAge,
     targetAge,
-    growthRate,
-    solPrice,
     stakingRate,
-    totalSolHeld,
+    growthRate,
     weeklyContribution,
+    totalSolHeld,
+    solPrice,
+    totalInvested,
   ]);
+
+  const projectedValue = projectionResults.projectedValue;
 
   const portfolioChartData = useMemo(() => {
     let runningInvested = 0;
@@ -199,11 +264,10 @@ export default function Dashboard() {
       return {
         date: shortDate(row.date),
         invested: Number(runningInvested.toFixed(2)),
-        value: Number((runningSol * solPrice).toFixed(2)),
-        sol: Number(runningSol.toFixed(4)),
+        value: Number((runningSol * solPriceNum).toFixed(2)),
       };
     });
-  }, [contributions, solPrice]);
+  }, [contributions, solPriceNum]);
 
   const contributionBarData = useMemo(() => {
     return contributions.map((row) => ({
@@ -218,7 +282,7 @@ export default function Dashboard() {
     const weeklyGrowth = Math.pow(1 + growthRate / 100, 1 / 52) - 1;
 
     let sol = totalSolHeld;
-    let price = solPrice;
+    let price = solPriceNum;
     let invested = totalInvested;
 
     const points: {
@@ -256,9 +320,29 @@ export default function Dashboard() {
     growthRate,
     weeklyContribution,
     totalSolHeld,
-    solPrice,
+    solPriceNum,
     totalInvested,
   ]);
+
+  const breakdownChartData = useMemo(() => {
+    return [
+      {
+        name: "Your Contributions",
+        value: Number(projectionResults.futureContributionsOnly.toFixed(2)),
+        color: "#2563eb",
+      },
+      {
+        name: "Price Growth",
+        value: Number(Math.max(projectionResults.priceGrowthBoost, 0).toFixed(2)),
+        color: "#16a34a",
+      },
+      {
+        name: "Staking Boost",
+        value: Number(Math.max(projectionResults.stakingOnlyBoost, 0).toFixed(2)),
+        color: "#f59e0b",
+      },
+    ];
+  }, [projectionResults]);
 
   async function handleAddContribution(e: React.FormEvent) {
     e.preventDefault();
@@ -307,9 +391,8 @@ export default function Dashboard() {
       setSavingContribution(true);
 
       const today = new Date().toISOString().slice(0, 10);
-
       const audAmount = weeklyContribution;
-      const price = solPrice;
+      const price = solPriceNum;
       const solBought = audAmount / price;
 
       const res = await fetch("/api/contributions", {
@@ -346,11 +429,13 @@ export default function Dashboard() {
   }
 
   return (
-    <main className="min-h-screen bg-gray-50 p-6">
+    <main className="min-h-screen bg-gray-50 p-4 md:p-6">
       <div className="mx-auto max-w-7xl space-y-6">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h1 className="text-4xl font-bold tracking-tight">Grandson SOL Tracker</h1>
+            <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
+              Grandson SOL Tracker
+            </h1>
             <p className="mt-2 text-gray-600">
               Long-term crypto investment tracker
             </p>
@@ -394,56 +479,95 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-2xl border bg-white p-5 shadow-sm">
-            <p className="text-sm text-gray-500">Total SOL Held</p>
-            <p className="mt-2 text-2xl font-bold">{fmtNum(totalSolHeld)}</p>
-          </div>
-
-          <div className="rounded-2xl border bg-white p-5 shadow-sm">
-            <p className="text-sm text-gray-500">Total Value</p>
-            <p className="mt-2 text-2xl font-bold">{fmtAud(totalValue)}</p>
-          </div>
-
-          <div className="rounded-2xl border bg-white p-5 shadow-sm">
-            <p className="text-sm text-gray-500">Total Invested</p>
-            <p className="mt-2 text-2xl font-bold">{fmtAud(totalInvested)}</p>
-          </div>
-
-          <div className="rounded-2xl border bg-white p-5 shadow-sm">
-            <p className="text-sm text-gray-500">Projected @ Age {targetAge}</p>
-            <p className="mt-2 text-2xl font-bold">{fmtAud(projectedValue)}</p>
-          </div>
+        {/* CLEAN TOP SUMMARY */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <StatCard
+            label="Portfolio Value"
+            value={fmtAud(portfolioValue)}
+            tone="green"
+            subtext="All wallet + staked SOL at live price"
+          />
+          <StatCard
+            label="Cost Basis"
+            value={fmtAud(costBasis)}
+            tone="blue"
+            subtext="Total money contributed"
+          />
+          <StatCard
+            label="Unrealised P/L"
+            value={fmtAud(profitLoss)}
+            tone={profitLoss >= 0 ? "green" : "red"}
+            subtext="Portfolio value minus cost basis"
+          />
+          <StatCard
+            label="Return %"
+            value={`${returnPercent.toFixed(2)}%`}
+            tone={returnPercent >= 0 ? "green" : "red"}
+            subtext="Unrealised return on invested capital"
+          />
+          <StatCard
+            label="Total SOL Held"
+            value={fmtNum(totalSolHeld, 4)}
+            subtext="Wallet SOL + staked SOL"
+          />
+          <StatCard
+            label={`Projected @ Age ${targetAge}`}
+            value={fmtAud(projectedValue)}
+            tone="green"
+            subtext="Based on current assumptions"
+          />
         </div>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-2xl border bg-white p-5 shadow-sm">
-            <p className="text-sm text-gray-500">SOL Price (AUD)</p>
-            <p className="mt-2 text-2xl font-bold">{fmtAud(solPrice)}</p>
-            <p className="mt-1 text-xs text-gray-500">Live from API</p>
-          </div>
+        <details className="rounded-2xl border bg-white p-5 shadow-sm">
+          <summary className="cursor-pointer text-xl font-semibold">
+            Net Position Details
+          </summary>
 
-          <div className="rounded-2xl border bg-white p-5 shadow-sm">
-            <p className="text-sm text-gray-500">Total SOL From Buys</p>
-            <p className="mt-2 text-2xl font-bold">{fmtNum(totalSolFromBuys, 4)}</p>
+          <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <StatCard
+              label="SOL Price (AUD)"
+              value={fmtAud(solPriceNum)}
+              subtext="Live from API"
+            />
+            <StatCard
+              label="Bought SOL"
+              value={fmtNum(totalSolFromBuys, 4)}
+              subtext="From recorded contributions"
+            />
+            <StatCard
+              label="Bought SOL Value"
+              value={fmtAud(boughtSolValue)}
+              subtext="Current value of bought SOL"
+            />
+            <StatCard
+              label="Avg Buy Price"
+              value={fmtAud(avgBuyPrice)}
+              subtext="Average from contribution buys"
+            />
+            <StatCard
+              label="Wallet Value"
+              value={fmtAud(walletOnlyValue)}
+              subtext="Value of wallet SOL only"
+            />
+            <StatCard
+              label="Staked Value"
+              value={fmtAud(stakedOnlyValue)}
+              subtext="Value of staked SOL only"
+            />
+            <StatCard
+              label="Manual Difference"
+              value={fmtNum(manualDifferenceSol, 4)}
+              tone={
+                manualDifferenceSol > 0
+                  ? "green"
+                  : manualDifferenceSol < 0
+                  ? "red"
+                  : "default"
+              }
+              subtext="Total held minus bought SOL"
+            />
           </div>
-
-          <div className="rounded-2xl border bg-white p-5 shadow-sm">
-            <p className="text-sm text-gray-500">Avg Buy Price</p>
-            <p className="mt-2 text-2xl font-bold">{fmtAud(avgBuyPrice)}</p>
-          </div>
-
-          <div className="rounded-2xl border bg-white p-5 shadow-sm">
-            <p className="text-sm text-gray-500">Gain / Loss</p>
-            <p
-              className={`mt-2 text-2xl font-bold ${
-                gainLoss >= 0 ? "text-green-600" : "text-red-600"
-              }`}
-            >
-              {fmtAud(gainLoss)}
-            </p>
-          </div>
-        </div>
+        </details>
 
         <div className="rounded-2xl border bg-white p-5 shadow-sm">
           <h2 className="text-xl font-semibold">SOL Price History</h2>
@@ -451,7 +575,7 @@ export default function Dashboard() {
             Last 30 days of SOL price in AUD.
           </p>
 
-          <div className="mt-5 h-96 w-full">
+          <div className="mt-5 h-80 w-full md:h-96">
             {priceHistory.length === 0 ? (
               <div className="flex h-full items-center justify-center text-sm text-gray-500">
                 Loading price history...
@@ -481,10 +605,10 @@ export default function Dashboard() {
           <div className="rounded-2xl border bg-white p-5 shadow-sm">
             <h2 className="text-xl font-semibold">Portfolio Growth</h2>
             <p className="mt-1 text-sm text-gray-500">
-              Invested amount vs current value of accumulated SOL.
+              Invested amount vs current value of accumulated SOL from buys.
             </p>
 
-            <div className="mt-5 h-80 w-full">
+            <div className="mt-5 h-72 w-full md:h-80">
               {portfolioChartData.length === 0 ? (
                 <div className="flex h-full items-center justify-center text-sm text-gray-500">
                   Add contributions to see the chart.
@@ -526,7 +650,7 @@ export default function Dashboard() {
               A quick visual of each contribution saved so far.
             </p>
 
-            <div className="mt-5 h-80 w-full">
+            <div className="mt-5 h-72 w-full md:h-80">
               {contributionBarData.length === 0 ? (
                 <div className="flex h-full items-center justify-center text-sm text-gray-500">
                   Add contributions to see the chart.
@@ -553,7 +677,7 @@ export default function Dashboard() {
             staking, and annual price growth assumptions.
           </p>
 
-          <div className="mt-5 h-96 w-full">
+          <div className="mt-5 h-80 w-full md:h-96">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={projectionChartData}>
                 <CartesianGrid strokeDasharray="3 3" />
@@ -582,6 +706,56 @@ export default function Dashboard() {
             </ResponsiveContainer>
           </div>
         </div>
+
+        <details className="rounded-2xl border bg-white p-5 shadow-sm" open>
+          <summary className="cursor-pointer text-xl font-semibold">
+            Future Value Breakdown
+          </summary>
+
+          <p className="mt-2 text-sm text-gray-500">
+            See how much of the future value comes from your own money, price growth,
+            and staking.
+          </p>
+
+          <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="rounded-xl border bg-gray-50 p-4">
+              <p className="text-sm text-gray-500">Your Contributions</p>
+              <p className="mt-2 text-2xl font-bold">
+                {fmtAud(projectionResults.futureContributionsOnly)}
+              </p>
+            </div>
+
+            <div className="rounded-xl border bg-gray-50 p-4">
+              <p className="text-sm text-gray-500">Price Growth Boost</p>
+              <p className="mt-2 text-2xl font-bold text-green-600">
+                {fmtAud(projectionResults.priceGrowthBoost)}
+              </p>
+            </div>
+
+            <div className="rounded-xl border bg-gray-50 p-4">
+              <p className="text-sm text-gray-500">Staking Boost</p>
+              <p className="mt-2 text-2xl font-bold text-amber-600">
+                {fmtAud(projectionResults.stakingOnlyBoost)}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-6 h-80 w-full md:h-96">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={breakdownChartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="value" radius={[8, 8, 0, 0]}>
+                  {breakdownChartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </details>
 
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
           <div className="rounded-2xl border bg-white p-5 shadow-sm">
@@ -739,51 +913,46 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="rounded-2xl border bg-white p-5 shadow-sm">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <h2 className="text-xl font-semibold">Contribution History</h2>
-              <p className="text-sm text-gray-500">
-                Saved rows from your database
-              </p>
-            </div>
+        <details className="rounded-2xl border bg-white p-5 shadow-sm">
+          <summary className="cursor-pointer text-xl font-semibold">
+            Contribution History
+          </summary>
 
-            {loadingContributions && (
-              <span className="text-sm text-gray-500">Loading...</span>
+          <div className="mt-4">
+            {loadingContributions ? (
+              <p className="text-sm text-gray-500">Loading...</p>
+            ) : contributionsError ? (
+              <p className="text-sm text-red-600">{contributionsError}</p>
+            ) : contributions.length === 0 ? (
+              <p className="text-sm text-gray-500">No contributions saved yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full border-collapse">
+                  <thead>
+                    <tr className="border-b bg-gray-50 text-left">
+                      <th className="p-3 text-sm font-semibold">Date</th>
+                      <th className="p-3 text-sm font-semibold">AUD</th>
+                      <th className="p-3 text-sm font-semibold">SOL Price</th>
+                      <th className="p-3 text-sm font-semibold">SOL Bought</th>
+                      <th className="p-3 text-sm font-semibold">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {contributions.map((row) => (
+                      <tr key={row.id} className="border-b">
+                        <td className="p-3 text-sm">{row.date}</td>
+                        <td className="p-3 text-sm">{fmtAud(Number(row.aud_amount))}</td>
+                        <td className="p-3 text-sm">{fmtAud(Number(row.sol_price_aud))}</td>
+                        <td className="p-3 text-sm">{fmtNum(Number(row.sol_bought), 6)}</td>
+                        <td className="p-3 text-sm">{row.notes || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
-
-          {contributionsError ? (
-            <p className="text-sm text-red-600">{contributionsError}</p>
-          ) : contributions.length === 0 ? (
-            <p className="text-sm text-gray-500">No contributions saved yet.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full border-collapse">
-                <thead>
-                  <tr className="border-b bg-gray-50 text-left">
-                    <th className="p-3 text-sm font-semibold">Date</th>
-                    <th className="p-3 text-sm font-semibold">AUD</th>
-                    <th className="p-3 text-sm font-semibold">SOL Price</th>
-                    <th className="p-3 text-sm font-semibold">SOL Bought</th>
-                    <th className="p-3 text-sm font-semibold">Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {contributions.map((row) => (
-                    <tr key={row.id} className="border-b">
-                      <td className="p-3 text-sm">{row.date}</td>
-                      <td className="p-3 text-sm">{fmtAud(Number(row.aud_amount))}</td>
-                      <td className="p-3 text-sm">{fmtAud(Number(row.sol_price_aud))}</td>
-                      <td className="p-3 text-sm">{fmtNum(Number(row.sol_bought), 6)}</td>
-                      <td className="p-3 text-sm">{row.notes || "-"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+        </details>
       </div>
     </main>
   );
