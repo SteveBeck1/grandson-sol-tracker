@@ -191,6 +191,54 @@ export default function Dashboard() {
     }));
   }, [contributions]);
 
+  const projectionChartData = useMemo(() => {
+    const years = Math.max(targetAge - currentAge, 0);
+    const weeklyStake = Math.pow(1 + stakingRate / 100, 1 / 52) - 1;
+    const weeklyGrowth = Math.pow(1 + growthRate / 100, 1 / 52) - 1;
+
+    let sol = totalSolHeld;
+    let price = solPrice;
+    let invested = totalInvested;
+
+    const points: {
+      age: number;
+      value: number;
+      invested: number;
+    }[] = [];
+
+    points.push({
+      age: currentAge,
+      value: Number((sol * price).toFixed(2)),
+      invested: Number(invested.toFixed(2)),
+    });
+
+    for (let year = 1; year <= years; year++) {
+      for (let week = 0; week < 52; week++) {
+        sol += weeklyContribution / price;
+        invested += weeklyContribution;
+        sol *= 1 + weeklyStake;
+        price *= 1 + weeklyGrowth;
+      }
+
+      points.push({
+        age: currentAge + year,
+        value: Number((sol * price).toFixed(2)),
+        invested: Number(invested.toFixed(2)),
+      });
+    }
+
+    return points;
+  }, [
+    currentAge,
+    targetAge,
+    stakingRate,
+    growthRate,
+    weeklyContribution,
+    totalSolHeld,
+    solPrice,
+    totalInvested,
+  ]);
+
   async function handleAddContribution(e: React.FormEvent) {
     e.preventDefault();
 
@@ -398,7 +446,8 @@ export default function Dashboard() {
                       dataKey="invested"
                       stroke="#2563eb"
                       strokeWidth={3}
-                      dot={false}
+                      dot={{ r: 4 }}
+                      activeDot={{ r: 6 }}
                       name="Invested"
                     />
                     <Line
@@ -406,7 +455,8 @@ export default function Dashboard() {
                       dataKey="value"
                       stroke="#16a34a"
                       strokeWidth={3}
-                      dot={false}
+                      dot={{ r: 4 }}
+                      activeDot={{ r: 6 }}
                       name="Current Value"
                     />
                   </LineChart>
@@ -438,6 +488,43 @@ export default function Dashboard() {
                 </ResponsiveContainer>
               )}
             </div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          <h2 className="text-xl font-semibold">Projection Curve to Age {targetAge}</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            Estimated growth from now to your target age using weekly contributions,
+            staking, and annual price growth assumptions.
+          </p>
+
+          <div className="mt-5 h-96 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={projectionChartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="age" />
+                <YAxis />
+                <Tooltip />
+                <Line
+                  type="monotone"
+                  dataKey="invested"
+                  stroke="#2563eb"
+                  strokeWidth={3}
+                  dot={{ r: 4 }}
+                  activeDot={{ r: 6 }}
+                  name="Projected Invested"
+                />
+                <Line
+                  type="monotone"
+                  dataKey="value"
+                  stroke="#16a34a"
+                  strokeWidth={3}
+                  dot={{ r: 4 }}
+                  activeDot={{ r: 6 }}
+                  name="Projected Value"
+                />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
         </div>
 
