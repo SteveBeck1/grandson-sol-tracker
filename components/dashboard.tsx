@@ -1,6 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 type ContributionRow = {
   id: string;
@@ -24,6 +35,15 @@ function fmtNum(n: number, d = 3) {
   return new Intl.NumberFormat("en-AU", {
     maximumFractionDigits: d,
   }).format(n || 0);
+}
+
+function shortDate(dateStr: string) {
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString("en-AU", {
+    day: "2-digit",
+    month: "short",
+  });
 }
 
 export default function Dashboard() {
@@ -61,7 +81,11 @@ export default function Dashboard() {
         throw new Error(data?.error || "Failed to load contributions");
       }
 
-      setContributions(Array.isArray(data) ? data : []);
+      const sorted = Array.isArray(data)
+        ? [...data].sort((a, b) => a.date.localeCompare(b.date))
+        : [];
+
+      setContributions(sorted);
     } catch (err) {
       console.error("Failed to load contributions", err);
       setContributionsError("Could not load contributions");
@@ -143,6 +167,30 @@ export default function Dashboard() {
     weeklyContribution,
   ]);
 
+  const portfolioChartData = useMemo(() => {
+    let runningInvested = 0;
+    let runningSol = 0;
+
+    return contributions.map((row) => {
+      runningInvested += Number(row.aud_amount || 0);
+      runningSol += Number(row.sol_bought || 0);
+
+      return {
+        date: shortDate(row.date),
+        invested: Number(runningInvested.toFixed(2)),
+        value: Number((runningSol * solPrice).toFixed(2)),
+        sol: Number(runningSol.toFixed(4)),
+      };
+    });
+  }, [contributions, solPrice]);
+
+  const contributionBarData = useMemo(() => {
+    return contributions.map((row) => ({
+      date: shortDate(row.date),
+      amount: Number(row.aud_amount || 0),
+    }));
+  }, [contributions]);
+
   async function handleAddContribution(e: React.FormEvent) {
     e.preventDefault();
 
@@ -184,46 +232,47 @@ export default function Dashboard() {
   }
 
   async function handleAutoFillWeeklyBuy() {
-  try {
-    setSaveMessage("Saving weekly buy...");
-    setSavingContribution(true);
+    try {
+      setSaveMessage("Saving weekly buy...");
+      setSavingContribution(true);
 
-    const today = new Date().toISOString().slice(0, 10);
+      const today = new Date().toISOString().slice(0, 10);
 
-    const audAmount = weeklyContribution;
-    const price = solPrice;
-    const solBought = audAmount / price;
+      const audAmount = weeklyContribution;
+      const price = solPrice;
+      const solBought = audAmount / price;
 
-    const res = await fetch("/api/contributions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        date: today,
-        aud_amount: audAmount,
-        sol_price_aud: price,
-        sol_bought: solBought,
-        notes: "Weekly auto buy",
-      }),
-    });
+      const res = await fetch("/api/contributions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          date: today,
+          aud_amount: audAmount,
+          sol_price_aud: price,
+          sol_bought: solBought,
+          notes: "Weekly auto buy",
+        }),
+      });
 
-    const data = await res.json();
+      const data = await res.json();
 
-    if (!res.ok) {
-      throw new Error(data?.error || "Failed to save weekly buy");
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to save weekly buy");
+      }
+
+      setSaveMessage("✅ Weekly buy saved!");
+
+      await loadContributions();
+      await fetchLivePrice();
+    } catch (err) {
+      console.error(err);
+      setSaveMessage("❌ Failed to save weekly buy");
+    } finally {
+      setSavingContribution(false);
     }
-
-    setSaveMessage("✅ Weekly buy saved!");
-
-    await loadContributions();
-  } catch (err) {
-    console.error(err);
-    setSaveMessage("❌ Failed to save weekly buy");
-  } finally {
-    setSavingContribution(false);
   }
-}
 
   return (
     <main className="min-h-screen bg-gray-50 p-6">
@@ -322,6 +371,73 @@ export default function Dashboard() {
             >
               {fmtAud(gainLoss)}
             </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+          <div className="rounded-2xl border bg-white p-5 shadow-sm">
+            <h2 className="text-xl font-semibold">Portfolio Growth</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Invested amount vs current value of accumulated SOL.
+            </p>
+
+            <div className="mt-5 h-80 w-full">
+              {portfolioChartData.length === 0 ? (
+                <div className="flex h-full items-center justify-center text-sm text-gray-500">
+                  Add contributions to see the chart.
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={portfolioChartData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" />
+                    <YAxis />
+                    <Tooltip />
+                    <Line
+                      type="monotone"
+                      dataKey="invested"
+                      stroke="#2563eb"
+                      strokeWidth={3}
+                      dot={false}
+                      name="Invested"
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="value"
+                      stroke="#16a34a"
+                      strokeWidth={3}
+                      dot={false}
+                      name="Current Value"
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border bg-white p-5 shadow-sm">
+            <h2 className="text-xl font-semibold">Contribution Amounts</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              A quick visual of each contribution saved so far.
+            </p>
+
+            <div className="mt-5 h-80 w-full">
+              {contributionBarData.length === 0 ? (
+                <div className="flex h-full items-center justify-center text-sm text-gray-500">
+                  Add contributions to see the chart.
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={contributionBarData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" />
+                    <YAxis />
+                    <Tooltip />
+                    <Bar dataKey="amount" fill="#0f172a" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
           </div>
         </div>
 
