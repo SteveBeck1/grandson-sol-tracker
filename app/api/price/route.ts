@@ -1,18 +1,25 @@
 import { NextResponse } from "next/server";
-import { getSolPriceAud } from "@/app/lib/coingecko";
 
 export async function GET() {
   try {
-    const price = await getSolPriceAud();
+    const res = await fetch(
+      "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=aud",
+      {
+        headers: {
+          accept: "application/json",
+        },
+        cache: "no-store", // always fresh
+      }
+    );
+
+    const data = await res.json();
 
     return NextResponse.json({
-      symbol: "SOL",
-      currency: "AUD",
-      price,
+      price: data.solana.aud,
     });
-  } catch (error) {
+  } catch (err) {
     return NextResponse.json(
-      { error: "Could not fetch SOL price" },
+      { error: "Failed to fetch price" },
       { status: 500 }
     );
   }

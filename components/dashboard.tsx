@@ -29,8 +29,8 @@ function fmtNum(n: number, d = 3) {
 export default function Dashboard() {
   const [solPrice, setSolPrice] = useState(120);
 
-  const [walletSol, setWalletSol] = useState(0.85);
-  const [stakedSol, setStakedSol] = useState(6.22);
+  const [walletSol, setWalletSol] = useState(0.01);
+  const [stakedSol, setStakedSol] = useState(5.3);
 
   const [weeklyContribution, setWeeklyContribution] = useState(50);
   const [stakingRate, setStakingRate] = useState(5.63);
@@ -70,22 +70,27 @@ export default function Dashboard() {
     }
   }
 
-  useEffect(() => {
-    async function loadPrice() {
-      try {
-        const res = await fetch("/api/price");
-        const data = await res.json();
+  async function fetchLivePrice() {
+    try {
+      const res = await fetch("/api/price");
+      const data = await res.json();
 
-        if (data?.price) {
-          const livePrice = Number(data.price);
-          setSolPrice(livePrice);
-        }
-      } catch (err) {
-        console.error("Failed to load price", err);
+      if (data?.price) {
+        setSolPrice(Number(data.price));
       }
+    } catch (err) {
+      console.error("Price fetch failed", err);
     }
+  }
 
-    loadPrice();
+  useEffect(() => {
+    fetchLivePrice();
+
+    const interval = setInterval(() => {
+      fetchLivePrice();
+    }, 60000);
+
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -169,6 +174,7 @@ export default function Dashboard() {
       setNewNotes("Weekly contribution");
 
       await loadContributions();
+      await fetchLivePrice();
     } catch (err) {
       console.error("Failed to save contribution", err);
       setSaveMessage("Could not save contribution.");
@@ -177,22 +183,66 @@ export default function Dashboard() {
     }
   }
 
-  function handleAutoFillWeeklyBuy() {
-    setNewDate(new Date().toISOString().slice(0, 10));
-    setNewAudAmount(50);
-    setNewSolPriceAud(solPrice);
-    setNewNotes("Weekly auto buy");
-    setSaveMessage("");
+  async function handleAutoFillWeeklyBuy() {
+  try {
+    setSaveMessage("Saving weekly buy...");
+    setSavingContribution(true);
+
+    const today = new Date().toISOString().slice(0, 10);
+
+    const audAmount = weeklyContribution;
+    const price = solPrice;
+    const solBought = audAmount / price;
+
+    const res = await fetch("/api/contributions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        date: today,
+        aud_amount: audAmount,
+        sol_price_aud: price,
+        sol_bought: solBought,
+        notes: "Weekly auto buy",
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data?.error || "Failed to save weekly buy");
+    }
+
+    setSaveMessage("✅ Weekly buy saved!");
+
+    await loadContributions();
+  } catch (err) {
+    console.error(err);
+    setSaveMessage("❌ Failed to save weekly buy");
+  } finally {
+    setSavingContribution(false);
   }
+}
 
   return (
     <main className="min-h-screen bg-gray-50 p-6">
       <div className="mx-auto max-w-7xl space-y-6">
-        <div>
-          <h1 className="text-4xl font-bold tracking-tight">Grandson SOL Tracker</h1>
-          <p className="mt-2 text-gray-600">
-            Long-term crypto investment tracker
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-4xl font-bold tracking-tight">Grandson SOL Tracker</h1>
+            <p className="mt-2 text-gray-600">
+              Long-term crypto investment tracker
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={fetchLivePrice}
+            className="rounded-lg border bg-white px-4 py-2 text-sm hover:bg-gray-50"
+          >
+            Refresh Live Price
+          </button>
         </div>
 
         <div className="rounded-2xl border bg-white p-5 shadow-sm">
@@ -250,6 +300,7 @@ export default function Dashboard() {
           <div className="rounded-2xl border bg-white p-5 shadow-sm">
             <p className="text-sm text-gray-500">SOL Price (AUD)</p>
             <p className="mt-2 text-2xl font-bold">{fmtAud(solPrice)}</p>
+            <p className="mt-1 text-xs text-gray-500">Live from API</p>
           </div>
 
           <div className="rounded-2xl border bg-white p-5 shadow-sm">
