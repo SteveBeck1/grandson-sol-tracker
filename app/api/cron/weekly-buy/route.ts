@@ -88,7 +88,7 @@ export async function GET() {
       success: true,
       price,
       solBought,
-    });
+    })
   } catch (err: any) {
     console.error("Cron error:", err);
 
