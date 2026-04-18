@@ -1,107 +1,47 @@
-import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/app/lib/supabase";
+import { createClient } from "@supabase/supabase-js";
 
-export async function GET(req: NextRequest) {
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
+export async function GET() {
   try {
-    const authHeader = req.headers.get("authorization");
-    const expected = `Bearer ${process.env.CRON_SECRET}`;
+    // 1. Get latest SOL price
+    const priceRes = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=aud");
+    const priceData = await priceRes.json();
 
-    if (!process.env.CRON_SECRET) {
-      return NextResponse.json(
-        { error: "CRON_SECRET is missing" },
-        { status: 500 }
-      );
+    const price = priceData?.solana?.aud;
+
+    if (!price) {
+      throw new Error("Failed to fetch SOL price");
     }
 
-    if (authHeader !== expected) {
-      return NextResponse.json(
-        { error: "Unauthorized cron request" },
-        { status: 401 }
-      );
-    }
+    // 2. Weekly amount (you can later make this dynamic)
+    const weeklyAmount = 50;
 
-    const buyAmount = Number(process.env.WEEKLY_BUY_AMOUNT || "50");
+    const solBought = weeklyAmount / price;
+
     const today = new Date().toISOString().slice(0, 10);
 
-    const existing = await supabase
-      .from("contributions")
-      .select("id")
-      .eq("date", today)
-      .eq("notes", "Weekly auto buy")
-      .limit(1);
-
-    if (existing.error) {
-      return NextResponse.json(
-        { error: existing.error.message },
-        { status: 500 }
-      );
-    }
-
-    if (existing.data && existing.data.length > 0) {
-      return NextResponse.json({
-        ok: true,
-        skipped: true,
-        message: "Weekly auto buy already exists for today",
-      });
-    }
-
-    const priceRes = await fetch(
-      "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=aud",
+    // 3. Insert into Supabase
+    const { error } = await supabase.from("contributions").insert([
       {
-        headers: {
-          accept: "application/json",
-        },
-        cache: "no-store",
-      }
-    );
-
-    if (!priceRes.ok) {
-      return NextResponse.json(
-        { error: "Failed to fetch live SOL price" },
-        { status: 500 }
-      );
-    }
-
-    const priceJson = await priceRes.json();
-    const solPriceAud = Number(priceJson?.solana?.aud);
-
-    if (!solPriceAud || Number.isNaN(solPriceAud)) {
-      return NextResponse.json(
-        { error: "Invalid SOL price received" },
-        { status: 500 }
-      );
-    }
-
-    const solBought = buyAmount / solPriceAud;
-
-    const insert = await supabase
-      .from("contributions")
-      .insert({
         date: today,
-        aud_amount: buyAmount,
-        sol_price_aud: solPriceAud,
+        aud_amount: weeklyAmount,
+        sol_price_aud: price,
         sol_bought: solBought,
-        notes: "Weekly auto buy",
-      })
-      .select()
-      .single();
+        notes: "Auto weekly buy",
+      },
+    ]);
 
-    if (insert.error) {
-      return NextResponse.json(
-        { error: insert.error.message },
-        { status: 500 }
-      );
+    if (error) {
+      throw error;
     }
 
-    return NextResponse.json({
-      ok: true,
-      saved: true,
-      row: insert.data,
-    });
-  } catch (error) {
-    return NextResponse.json(
-      { error: "Unexpected cron failure" },
-      { status: 500 }
-    );
+    return Response.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    return Response.json({ error: "Cron failed" }, { status: 500 });
   }
 }

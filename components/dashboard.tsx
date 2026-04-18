@@ -23,6 +23,11 @@ type ContributionRow = {
   created_at?: string;
 };
 
+type PriceHistoryRow = {
+  date: string;
+  price: number;
+};
+
 function fmtAud(n: number) {
   return new Intl.NumberFormat("en-AU", {
     style: "currency",
@@ -59,6 +64,8 @@ export default function Dashboard() {
   const [targetAge, setTargetAge] = useState(20);
 
   const [contributions, setContributions] = useState<ContributionRow[]>([]);
+  const [priceHistory, setPriceHistory] = useState<PriceHistoryRow[]>([]);
+
   const [loadingContributions, setLoadingContributions] = useState(true);
   const [contributionsError, setContributionsError] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
@@ -107,8 +114,22 @@ export default function Dashboard() {
     }
   }
 
+  async function loadPriceHistory() {
+    try {
+      const res = await fetch("/api/price-history");
+      const data = await res.json();
+
+      if (res.ok && Array.isArray(data)) {
+        setPriceHistory(data);
+      }
+    } catch (err) {
+      console.error("Price history fetch failed", err);
+    }
+  }
+
   useEffect(() => {
     fetchLivePrice();
+    loadPriceHistory();
 
     const interval = setInterval(() => {
       fetchLivePrice();
@@ -271,6 +292,7 @@ export default function Dashboard() {
 
       await loadContributions();
       await fetchLivePrice();
+      await loadPriceHistory();
     } catch (err) {
       console.error("Failed to save contribution", err);
       setSaveMessage("Could not save contribution.");
@@ -314,6 +336,7 @@ export default function Dashboard() {
 
       await loadContributions();
       await fetchLivePrice();
+      await loadPriceHistory();
     } catch (err) {
       console.error(err);
       setSaveMessage("❌ Failed to save weekly buy");
@@ -419,6 +442,38 @@ export default function Dashboard() {
             >
               {fmtAud(gainLoss)}
             </p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          <h2 className="text-xl font-semibold">SOL Price History</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            Last 30 days of SOL price in AUD.
+          </p>
+
+          <div className="mt-5 h-96 w-full">
+            {priceHistory.length === 0 ? (
+              <div className="flex h-full items-center justify-center text-sm text-gray-500">
+                Loading price history...
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={priceHistory}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" minTickGap={30} />
+                  <YAxis />
+                  <Tooltip />
+                  <Line
+                    type="monotone"
+                    dataKey="price"
+                    stroke="#16a34a"
+                    strokeWidth={3}
+                    dot={false}
+                    name="SOL Price"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 
